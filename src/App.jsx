@@ -91,14 +91,17 @@ function formatTime12(hhmm) {
   return `${hour12}:${m[2]} ${ampm}`;
 }
 
-// group clips by date + hour bucket, sorted chronologically
-// (grouped by date too, not just hour, since "all clubs / all dates" browsing can mix dates)
+// group clips by date + hour bucket + club, sorted chronologically
+// (grouped by club too, not just date/hour, so clips from different clubs in the
+// same hour don't get merged into one link — each club gets its own detail page)
 function groupByHour(list) {
   const map = new Map();
   list.forEach((c) => {
     const label = hourBucketLabel(c.time);
-    const key = `${c.date}__${label}`;
-    if (!map.has(key)) map.set(key, { date: c.date, label, hour24: hourOf(c.time), items: [] });
+    const key = `${c.date}__${label}__${c.club}`;
+    if (!map.has(key)) {
+      map.set(key, { date: c.date, label, hour24: hourOf(c.time), club: c.club, items: [] });
+    }
     map.get(key).items.push(c);
   });
   return Array.from(map.values()).sort((a, b) =>
@@ -250,9 +253,8 @@ function Grid() {
 
   const openClip = (bucket) => {
     // one path segment: 2026-07-20&9:00AM (& encoded so it stays one segment)
-    // club only goes in the query string when a specific club is selected
-    const params = loc !== "all" ? `?loc=${loc}` : "";
-    navigate(`/${bucket.date}${encodeURIComponent("&" + bucket.label)}${params}`);
+    // club always goes in the query string so links from different clubs stay distinct
+    navigate(`/${bucket.date}${encodeURIComponent("&" + bucket.label)}?loc=${bucket.club}`);
   };
 
   return (
@@ -308,16 +310,23 @@ function Grid() {
           <div className="empty">No highlights found for these filters. Try clearing the date, time, or club.</div>
         ) : (
           <div className="clips">
-            {buckets.map((b) => (
-              <button key={`${b.date}__${b.label}`} className="clip" onClick={() => openClip(b)}>
-                <div className="thumb">
-                  <span className="thumb-play"><Play size={20} fill="#fff" /></span>
-                  {b.items.length > 1 && <span className="clip-count">{b.items.length} videos</span>}
-                </div>
-                <div className="clip-time">{b.label}</div>
-                <div className="clip-date">{b.date}</div>
-              </button>
-            ))}
+            {buckets.map((b) => {
+              const club = LOCATIONS.find((l) => l.id === b.club);
+              return (
+                <button key={`${b.date}__${b.label}__${b.club}`} className="clip" onClick={() => openClip(b)}>
+                  <div className="thumb">
+                    <span className="thumb-play"><Play size={20} fill="#fff" /></span>
+                    {b.items.length > 1 && <span className="clip-count">{b.items.length} videos</span>}
+                  </div>
+                  <div className="clip-time">{b.label}</div>
+                  <div className="clip-date">{b.date}</div>
+                  <div className="clip-club">
+                    <span className="dot" style={{ background: club?.color }} />
+                    {(club?.label || b.club).toUpperCase()}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </main>
@@ -441,6 +450,8 @@ const CSS = `
     align-items: center; justify-content: center; transition: .25s; }
   .clip-time { text-align: center; margin-top: 12px; font-size: 14px; letter-spacing: .02em; }
   .clip-date { text-align: center; margin-top: 3px; font-size: 12px; opacity: .6; }
+  .clip-club { display: flex; align-items: center; justify-content: center; gap: 6px;
+    margin-top: 6px; font-size: 11px; letter-spacing: .04em; opacity: .75; }
   .clip-count { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,.6);
     color: #fff; font-size: 11px; padding: 3px 9px; border-radius: 999px;
     backdrop-filter: blur(4px); }
