@@ -105,7 +105,11 @@ function groupByHour(list) {
     map.get(key).items.push(c);
   });
   return Array.from(map.values()).sort((a, b) =>
-    a.date === b.date ? a.hour24 - b.hour24 : a.date < b.date ? -1 : 1
+    a.date === b.date
+  ? b.hour24 - a.hour24
+  : a.date < b.date
+    ? 1
+    : -1
   );
 }
 
