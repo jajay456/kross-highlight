@@ -640,8 +640,8 @@ const CSS = `
 
   .app { position: relative; min-height: 100vh; overflow-x: hidden;
     font-family: system-ui, -apple-system, sans-serif; color: var(--fg); transition: color .2s; }
-  .bg { position: fixed; inset: -20px; background-size: cover; background-position: center; z-index: 0;
-    filter: blur(3px) saturate(1.1); }
+  .bg { position: fixed; inset: 0; background-size: cover; background-position: center; z-index: 0;
+    filter: saturate(1.1); }
   .scrim { position: fixed; inset: 0; z-index: 1;
     background: linear-gradient(180deg, var(--scrim-1), var(--scrim-2)); transition: background .2s; }
 
