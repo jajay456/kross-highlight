@@ -148,9 +148,10 @@ function Shell({ children }) {
       <div className="scrim" />
       <nav className="nav">
         <Link to="/" className="brand">
-          <svg width="30" height="30" viewBox="0 0 32 32" fill="none">
-            <path d="M4 4 L14 16 L4 28" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M16 4 L26 16 L16 28" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" opacity=".6" />
+          <svg width="30" height="30" viewBox="22 22 256 255" fill="currentColor" aria-hidden="true">
+            <path d="M23 22 H104 L278 277 H197 Z" />
+            <path d="M196 22 H277 L237 82 Z" />
+            <path d="M22 277 H104 L63 217 Z" />
           </svg>
           <span>KROSS</span>
         </Link>
