@@ -37,8 +37,18 @@ const LOCATIONS = [
 
 const BG = bgCourt;
 
+const COURTS = ["1", "2", "3"];
+
+// durationSeconds is stored as a string, e.g. "40" -> "0:40"
+const formatDuration = (sec) => {
+  const n = Math.round(Number(sec));
+  return n > 0 ? `${Math.floor(n / 60)}:${String(n % 60).padStart(2, "0")}` : null;
+};
+// Firestore stores court as "court_1"; also accept 1 / "1" -> normalised to "1"
+const courtOf = (clip) => String(clip.court ?? "").match(/\d+/)?.[0] ?? null;
+
 // clips live in Firestore, collection `kross_highlight`:
-// { date: "2026-07-20", time: "09:00", club: "onnut", videoUrl, createdAt }
+// { date: "2026-07-20", time: "09:00", club: "onnut", court: "court_1", videoUrl, createdAt }
 function useClips() {
   const [clips, setClips] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -201,15 +211,24 @@ const canShareFile = (file) => IS_MOBILE && navigator.canShare?.({ files: [file]
 function Detail() {
   // route param is the whole segment: "2026-07-20&9:00AM" (9:00AM = hour bucket)
   const { slug } = useParams();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [date, time] = decodeURIComponent(slug || "").split("&");
   const loc = searchParams.get("loc");
+  const court = searchParams.get("court"); // null = all courts
   const { clips, loading, error } = useClips();
 
   // every clip matching this date + club that falls inside this hour, e.g. 9:00AM -> 9:00-9:59
-  const matches = clips.filter(
+  const hourClips = clips.filter(
     (c) => c.date === date && (!loc || c.club === loc) && hourBucketLabel(c.time) === time
   );
+  const matches = hourClips.filter((c) => !court || courtOf(c) === court);
+  const courtCount = (id) => hourClips.filter((c) => courtOf(c) === id).length;
+  const selectCourt = (id) => {
+    const next = new URLSearchParams(searchParams);
+    if (id) next.set("court", id);
+    else next.delete("court");
+    setSearchParams(next, { replace: true });
+  };
   const [activeId, setActiveId] = useState(null);
   const [downloading, setDownloading] = useState(false);
   // file fetched but the share sheet couldn't open (the tap "expired" during a slow
@@ -251,6 +270,20 @@ function Detail() {
         <Link to="/" className="back">
           <ArrowLeft size={16} /> Back to highlights
         </Link>
+        <div className="courts">
+          <button className={`court-tab${!court ? " active" : ""}`} onClick={() => selectCourt(null)}>
+            ALL <span className="court-count">{hourClips.length}</span>
+          </button>
+          {COURTS.map((id) => (
+            <button
+              key={id}
+              className={`court-tab${court === id ? " active" : ""}`}
+              onClick={() => selectCourt(id)}
+            >
+              COURT {id} <span className="court-count">{courtCount(id)}</span>
+            </button>
+          ))}
+        </div>
         <div className="player">
           {active ? (
             <video
@@ -270,7 +303,11 @@ function Detail() {
         </div>
         <div className="meta">
           <div className="meta-time">{active ? formatTime12(active.time) : time}</div>
-          <div className="meta-date">{date}{active ? ` · ${active.club.toUpperCase()}` : ""}</div>
+          <div className="meta-date">
+            {date}
+            {active ? ` · ${active.club.toUpperCase()}` : ""}
+            {active && courtOf(active) ? ` · COURT ${courtOf(active)}` : ""}
+          </div>
           {active && (
             <button className="download" onClick={onDownload} disabled={downloading}>
               {downloading ? <LoaderCircle size={16} className="spin" /> : <Download size={16} />}
@@ -280,26 +317,48 @@ function Detail() {
         </div>
 
         {matches.length > 1 && (
-          <div className="hour-list">
-            <div className="hour-list-title">
-              {matches.length} videos · {time} – {rangeEnd}
+          <section className="hour-list">
+            <div className="hour-list-head">
+              <span className="hour-list-title">{matches.length} videos</span>
+              <span className="hour-list-range">{time} – {rangeEnd}</span>
             </div>
             <div className="hour-clips">
-              {matches.map((c) => (
-                <button
-                  key={c.id}
-                  className={`hour-clip${c.id === active?.id ? " active" : ""}`}
-                  onClick={() => setActiveId(c.id)}
-                >
-                  <div className="hour-thumb">
-                    <Play size={14} fill="#fff" />
-                  </div>
-                  <span>{formatTime12(c.time)}</span>
-                  <span className="hour-clip-club">{c.club.toUpperCase()}</span>
-                </button>
-              ))}
+              {matches.map((c) => {
+                const isActive = c.id === active?.id;
+                const dur = formatDuration(c.durationSeconds);
+                // club only matters when the list mixes clubs (no ?loc filter)
+                const sub = [!loc && c.club.toUpperCase(), courtOf(c) && `Court ${courtOf(c)}`]
+                  .filter(Boolean).join(" · ");
+                return (
+                  <button
+                    key={c.id}
+                    className={`hour-clip${isActive ? " active" : ""}`}
+                    onClick={() => {
+                      setActiveId(c.id);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }}
+                  >
+                    <div className="hour-thumb">
+                      {/* #t=1 makes the browser paint a real frame as the thumbnail */}
+                      <video src={`${c.videoUrl}#t=1`} preload="metadata" muted playsInline tabIndex={-1} />
+                      <span className="hour-play">
+                        <Play size={14} fill="currentColor" />
+                      </span>
+                      {isActive ? (
+                        <span className="hour-now">NOW PLAYING</span>
+                      ) : (
+                        dur && <span className="hour-dur">{dur}</span>
+                      )}
+                    </div>
+                    <div className="hour-info">
+                      <span className="hour-time">{formatTime12(c.time)}</span>
+                      {sub && <span className="hour-sub">{sub}</span>}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-          </div>
+          </section>
         )}
       </main>
     </Shell>
@@ -859,19 +918,38 @@ const CSS = `
   @keyframes pulse { 50% { opacity: .45; } }
 
   /* ---- hour list (detail) ---- */
-  .hour-list { margin-top: 40px; }
-  .hour-list-title { font-size: 14px; opacity: .75; margin-bottom: 14px; text-align: center; }
-  .hour-clips { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
-  .hour-clip { display: flex; flex-direction: column; align-items: center; gap: 8px;
-    background: none; border: none; cursor: pointer; padding: 0; color: var(--fg); }
-  .hour-thumb { width: 96px; aspect-ratio: 16 / 10; border-radius: 10px;
-    background: var(--surface-strong);
-    display: flex; align-items: center; justify-content: center; border: 2px solid transparent;
-    transition: .2s; }
-  .hour-clip.active .hour-thumb { border-color: var(--fg); }
+  .hour-list { margin-top: 36px; padding: 18px; border-radius: 22px; background: var(--surface);
+    border: 1px solid var(--border-soft); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+  .hour-list-head { display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px; margin-bottom: 14px; padding: 0 2px; }
+  .hour-list-title { font-size: 16px; font-weight: 700; letter-spacing: .02em; }
+  .hour-list-range { font-size: 13px; opacity: .6; }
+  .hour-clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .hour-clip { display: flex; flex-direction: column; gap: 8px; min-width: 0; text-align: left;
+    background: none; border: none; cursor: pointer; padding: 0; color: var(--fg);
+    -webkit-tap-highlight-color: transparent; }
+  .hour-clip:focus { outline: none; }
+  .hour-clip:focus-visible .hour-thumb { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .hour-thumb { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 12px;
+    overflow: hidden; background: #000; box-shadow: 0 0 0 1px var(--border-soft);
+    transition: transform .2s, box-shadow .2s; }
+  .hour-thumb video { width: 100%; height: 100%; object-fit: cover; display: block;
+    pointer-events: none; opacity: .85; transition: opacity .2s; }
   .hour-clip:hover .hour-thumb { transform: translateY(-3px); }
-  .hour-clip span { font-size: 12px; opacity: .85; }
-  .hour-clip-club { font-size: 10px; opacity: .55; letter-spacing: .04em; }
+  .hour-clip:hover .hour-thumb video, .hour-clip.active .hour-thumb video { opacity: 1; }
+  .hour-clip.active .hour-thumb { box-shadow: 0 0 0 2px var(--accent); }
+  .hour-play { position: absolute; top: 50%; left: 50%; width: 34px; height: 34px;
+    margin: -17px 0 0 -17px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; color: #fff; background: rgba(0,0,0,.45);
+    border: 1px solid rgba(255,255,255,.3); backdrop-filter: blur(6px); }
+  .hour-clip.active .hour-play { display: none; }
+  .hour-dur, .hour-now { position: absolute; bottom: 6px; font-size: 10px; font-weight: 600;
+    letter-spacing: .04em; padding: 3px 7px; border-radius: 6px; color: #fff; background: rgba(0,0,0,.65); }
+  .hour-dur { right: 6px; }
+  .hour-now { left: 6px; background: var(--accent); color: var(--on-accent); }
+  .hour-info { display: flex; flex-direction: column; gap: 2px; padding: 0 2px; }
+  .hour-time { font-size: 14px; font-weight: 600; }
+  .hour-sub { font-size: 11px; opacity: .55; letter-spacing: .03em; }
 
   /* ---- detail ---- */
   .detail { position: relative; z-index: 3; max-width: 900px; margin: 0 auto;
@@ -880,6 +958,19 @@ const CSS = `
     border: 1px solid var(--border); color: var(--fg); border-radius: 999px;
     padding: 9px 18px; font-size: 14px; cursor: pointer; margin-bottom: 26px; }
   .back:hover { background: var(--surface-hover); }
+  /* segmented control: one row of equal segments, also on phones */
+  .courts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; max-width: 520px;
+    margin: 0 auto 18px; padding: 4px; border-radius: 999px; background: var(--surface-strong);
+    border: 1px solid var(--border); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+  .court-tab { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0;
+    background: none; border: 0; color: var(--fg); border-radius: 999px; padding: 9px 4px;
+    font-size: 13px; font-weight: 600; letter-spacing: .04em; white-space: nowrap; cursor: pointer;
+    -webkit-tap-highlight-color: transparent; transition: background .15s, color .15s; }
+  .court-tab:hover:not(.active) { background: var(--surface-hover); }
+  .court-tab.active { background: var(--fg); color: var(--fg-inv); }
+  .court-tab:focus { outline: none; }
+  .court-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .court-count { font-size: 11px; opacity: .55; font-weight: 500; }
   .player { border-radius: 20px; overflow: hidden; border: 1px solid var(--border);
     box-shadow: 0 20px 60px var(--shadow-strong); }
   .player-video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
@@ -919,7 +1010,17 @@ const CSS = `
     .chip { flex: none; }
     .clips { grid-template-columns: 1fr; gap: 16px; }
     .back { padding: 8px 14px; font-size: 13px; margin-bottom: 18px; }
+    .courts { margin-bottom: 14px; }
+    .court-tab { font-size: 12px; letter-spacing: .02em; gap: 4px; padding: 8px 2px; }
+    .court-count { font-size: 10px; }
     .meta-time { font-size: 24px; }
-    .hour-thumb { width: 76px; }
+    /* phones: one swipeable row instead of a tall grid */
+    .hour-list { margin: 28px -16px 0; padding: 16px 0; border-radius: 0; border-left: 0; border-right: 0; }
+    .hour-list-head { padding: 0 16px; }
+    .hour-clips { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 44%;
+      gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 2px 16px 4px;
+      scroll-padding: 0 16px; scrollbar-width: none; }
+    .hour-clips::-webkit-scrollbar { display: none; }
+    .hour-clip { scroll-snap-align: start; }
   }
 `;
