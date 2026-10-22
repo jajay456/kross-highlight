@@ -169,25 +169,34 @@ function Shell({ children }) {
 }
 
 /* ---------- detail view ---------- */
-// <a download> is ignored for cross-origin URLs (Cloudinary / R2), so fetch the file
-// as a blob first. If CORS blocks the fetch, fall back to opening the video in a new tab.
-async function downloadClip(clip) {
+// phones: a plain download lands in Chrome/Files, not the gallery. The share sheet
+// offers "Save Video" (iOS) / Google Photos (Android), so phones go through that.
+// iPadOS reports itself as a Mac, hence the touch-point check.
+const IS_MOBILE =
+  /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+// <a download> is ignored for cross-origin URLs (Cloudinary / R2), so fetch the file first.
+// Throws if CORS blocks the fetch.
+async function fetchClipFile(clip) {
   const ext = clip.videoUrl.split("?")[0].match(/\.(\w+)$/)?.[1] || "mp4";
   const name = `kross-${clip.club}-${clip.date}-${clip.time.replace(":", "")}.${ext}`;
-  try {
-    const res = await fetch(clip.videoUrl);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const url = URL.createObjectURL(await res.blob());
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  } catch (err) {
-    console.warn("[download] blob fetch failed, opening in new tab", err);
-    window.open(clip.videoUrl, "_blank", "noopener");
-  }
+  const res = await fetch(clip.videoUrl);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  return new File([blob], name, { type: blob.type || "video/mp4" });
 }
+
+function saveFile(file) {
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file.name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const canShareFile = (file) => IS_MOBILE && navigator.canShare?.({ files: [file] });
 
 function Detail() {
   // route param is the whole segment: "2026-07-20&9:00AM" (9:00AM = hour bucket)
@@ -203,12 +212,33 @@ function Detail() {
   );
   const [activeId, setActiveId] = useState(null);
   const [downloading, setDownloading] = useState(false);
+  // file fetched but the share sheet couldn't open (the tap "expired" during a slow
+  // download, which Safari is strict about) -> a second tap opens it
+  const [pending, setPending] = useState(null);
   const active = matches.find((c) => c.id === activeId) || matches[0];
+  const pendingFile = pending && pending.id === active?.id ? pending.file : null;
+
+  const share = async (file) => {
+    try {
+      await navigator.share({ files: [file] });
+      setPending(null);
+    } catch (err) {
+      if (err.name === "AbortError") setPending(null); // user closed the sheet
+      else if (err.name === "NotAllowedError") setPending({ id: active.id, file });
+      else saveFile(file);
+    }
+  };
 
   const onDownload = async () => {
+    if (pendingFile) return share(pendingFile);
     setDownloading(true);
     try {
-      await downloadClip(active);
+      const file = await fetchClipFile(active);
+      if (canShareFile(file)) await share(file);
+      else saveFile(file);
+    } catch (err) {
+      console.warn("[download] fetch failed, opening in new tab", err);
+      window.open(active.videoUrl, "_blank", "noopener");
     } finally {
       setDownloading(false);
     }
@@ -244,7 +274,7 @@ function Detail() {
           {active && (
             <button className="download" onClick={onDownload} disabled={downloading}>
               {downloading ? <LoaderCircle size={16} className="spin" /> : <Download size={16} />}
-              {downloading ? "Downloading…" : "Download video"}
+              {downloading ? "Downloading…" : pendingFile ? "Save to phone" : "Download video"}
             </button>
           )}
         </div>
