@@ -10,7 +10,7 @@ import {
 } from "react-router-dom";
 import {
   Search, Moon, Sun, ArrowLeft, Play, Calendar, Clock, X, RotateCcw,
-  ChevronDown, ChevronLeft, ChevronRight,
+  ChevronDown, ChevronLeft, ChevronRight, Download, LoaderCircle,
 } from "lucide-react";
 import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
 import { db } from "./firebase";
@@ -169,6 +169,26 @@ function Shell({ children }) {
 }
 
 /* ---------- detail view ---------- */
+// <a download> is ignored for cross-origin URLs (Cloudinary / R2), so fetch the file
+// as a blob first. If CORS blocks the fetch, fall back to opening the video in a new tab.
+async function downloadClip(clip) {
+  const ext = clip.videoUrl.split("?")[0].match(/\.(\w+)$/)?.[1] || "mp4";
+  const name = `kross-${clip.club}-${clip.date}-${clip.time.replace(":", "")}.${ext}`;
+  try {
+    const res = await fetch(clip.videoUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) {
+    console.warn("[download] blob fetch failed, opening in new tab", err);
+    window.open(clip.videoUrl, "_blank", "noopener");
+  }
+}
+
 function Detail() {
   // route param is the whole segment: "2026-07-20&9:00AM" (9:00AM = hour bucket)
   const { slug } = useParams();
@@ -182,7 +202,17 @@ function Detail() {
     (c) => c.date === date && (!loc || c.club === loc) && hourBucketLabel(c.time) === time
   );
   const [activeId, setActiveId] = useState(null);
+  const [downloading, setDownloading] = useState(false);
   const active = matches.find((c) => c.id === activeId) || matches[0];
+
+  const onDownload = async () => {
+    setDownloading(true);
+    try {
+      await downloadClip(active);
+    } finally {
+      setDownloading(false);
+    }
+  };
   const rangeEnd = time.replace(":00", ":59");
 
   return (
@@ -211,6 +241,12 @@ function Detail() {
         <div className="meta">
           <div className="meta-time">{active ? formatTime12(active.time) : time}</div>
           <div className="meta-date">{date}{active ? ` · ${active.club.toUpperCase()}` : ""}</div>
+          {active && (
+            <button className="download" onClick={onDownload} disabled={downloading}>
+              {downloading ? <LoaderCircle size={16} className="spin" /> : <Download size={16} />}
+              {downloading ? "Downloading…" : "Download video"}
+            </button>
+          )}
         </div>
 
         {matches.length > 1 && (
@@ -823,6 +859,13 @@ const CSS = `
   .meta { margin-top: 26px; text-align: center; }
   .meta-time { font-size: 30px; font-weight: 700; letter-spacing: .04em; }
   .meta-date { margin-top: 6px; opacity: .7; font-size: 15px; }
+  .download { display: inline-flex; align-items: center; gap: 8px; margin-top: 18px;
+    background: var(--surface-strong); border: 1px solid var(--border); color: var(--fg);
+    border-radius: 999px; padding: 10px 20px; font-size: 14px; cursor: pointer; }
+  .download:hover:not(:disabled) { background: var(--surface-hover); }
+  .download:disabled { opacity: .6; cursor: wait; }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   @media (max-width: 720px) {
     .clips { grid-template-columns: repeat(2, 1fr); gap: 16px; }
