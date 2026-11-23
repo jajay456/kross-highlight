@@ -11,10 +11,10 @@ import {
 import {
   Search, Moon, Sun, ArrowLeft, Play, Calendar, Clock, X, RotateCcw,
   ChevronDown, ChevronLeft, ChevronRight, Download, LoaderCircle,
-  House, LayoutGrid, Heart, MessageCircle, Send, Trash2, LogOut, UserRound, Menu,
+  House, LayoutGrid, Heart, LogOut, UserRound, Menu,
 } from "lucide-react";
 import {
-  collection, query, orderBy, onSnapshot, limit, doc, setDoc, deleteDoc, addDoc, serverTimestamp,
+  collection, query, orderBy, onSnapshot, doc, setDoc, deleteDoc, serverTimestamp,
 } from "firebase/firestore";
 import { onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut } from "firebase/auth";
 import { db, auth, googleProvider } from "./firebase";
@@ -272,11 +272,9 @@ function Shell({ children, bare = false }) {
   );
 }
 
-/* ---------- likes & comments ---------- */
-// stored per clip in Firestore subcollections (see firestore.rules):
+/* ---------- likes ---------- */
+// stored per clip in Firestore (see firestore.rules):
 //   kross_highlight/{clipId}/likes/{uid}        { createdAt }
-//   kross_highlight/{clipId}/comments/{auto}    { uid, name, photo, text, createdAt }
-const COMMENT_MAX = 500;
 
 function useAuthUser() {
   const [user, setUser] = useState(() => auth.currentUser);
@@ -299,53 +297,26 @@ async function signInWithGoogle() {
   }
 }
 
-function useClipSocial(clipId) {
+function useClipLikes(clipId) {
   const [likeIds, setLikeIds] = useState([]);
-  const [comments, setComments] = useState([]);
   const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     if (!clipId) return;
     setLikeIds([]);
-    setComments([]);
     setUnavailable(false);
     // permission-denied here usually means firestore.rules hasn't been deployed yet
-    const onErr = (err) => {
-      console.warn("[social]", err.code, err.message);
-      setUnavailable(true);
-    };
-    const offLikes = onSnapshot(
+    return onSnapshot(
       collection(db, CLIPS_COLLECTION, clipId, "likes"),
       (snap) => setLikeIds(snap.docs.map((d) => d.id)),
-      onErr
+      (err) => {
+        console.warn("[likes]", err.code, err.message);
+        setUnavailable(true);
+      }
     );
-    const offComments = onSnapshot(
-      query(collection(db, CLIPS_COLLECTION, clipId, "comments"), orderBy("createdAt", "desc"), limit(100)),
-      (snap) =>
-        setComments(
-          snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }))
-        ),
-      onErr
-    );
-    return () => {
-      offLikes();
-      offComments();
-    };
   }, [clipId]);
 
-  return { likeIds, comments, unavailable };
-}
-
-// "just now" / "5m" / "3h" / "2d" / "21 Nov"
-function timeAgo(ts) {
-  const date = ts?.toDate ? ts.toDate() : null;
-  if (!date) return "just now";
-  const s = (Date.now() - date.getTime()) / 1000;
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`;
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  return { likeIds, unavailable };
 }
 
 function Avatar({ name, photo, size = 34 }) {
@@ -363,125 +334,6 @@ function Avatar({ name, photo, size = 34 }) {
     />
   ) : (
     <span className="avatar avatar-initial" style={{ width: size, height: size }}>{initial}</span>
-  );
-}
-
-function Comments({ clipId, comments, user, unavailable, onSignIn }) {
-  const [text, setText] = useState("");
-  const [sending, setSending] = useState(false);
-  const [err, setErr] = useState(null);
-
-  const send = async (e) => {
-    e.preventDefault();
-    const body = text.trim();
-    if (!body || !user || sending) return;
-    setSending(true);
-    setErr(null);
-    try {
-      await addDoc(collection(db, CLIPS_COLLECTION, clipId, "comments"), {
-        uid: user.uid,
-        name: user.displayName || "Player",
-        photo: user.photoURL || "",
-        text: body.slice(0, COMMENT_MAX),
-        createdAt: serverTimestamp(),
-      });
-      setText("");
-    } catch (error) {
-      console.warn("[comment]", error);
-      setErr("Couldn't post your comment. Please try again.");
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const remove = async (id) => {
-    try {
-      await deleteDoc(doc(db, CLIPS_COLLECTION, clipId, "comments", id));
-    } catch (error) {
-      console.warn("[comment delete]", error);
-    }
-  };
-
-  return (
-    <section className="comments" id="comments">
-      <h2 className="comments-title">
-        Comments <span className="comments-count">{comments.length}</span>
-      </h2>
-
-      {unavailable ? (
-        <p className="comments-note">Comments aren't available right now.</p>
-      ) : user ? (
-        <form className="comment-form" onSubmit={send}>
-          <Avatar name={user.displayName} photo={user.photoURL} />
-          <div className="comment-box">
-            <textarea
-              rows={1}
-              maxLength={COMMENT_MAX}
-              placeholder="Add a comment…"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                // Enter sends, Shift+Enter adds a line
-                if (e.key === "Enter" && !e.shiftKey) send(e);
-              }}
-            />
-            <button className="comment-send" type="submit" disabled={!text.trim() || sending} aria-label="Post comment">
-              {sending ? <LoaderCircle size={16} className="spin" /> : <Send size={16} />}
-            </button>
-          </div>
-        </form>
-      ) : (
-        <button className="signin-btn" onClick={onSignIn}>
-          <GoogleMark /> Sign in with Google to comment
-        </button>
-      )}
-      {err && <p className="comments-error">{err}</p>}
-      {user && !unavailable && (
-        <p className="comments-who">
-          Signed in as {user.displayName || user.email} ·{" "}
-          <button className="link-btn" onClick={() => signOut(auth)}>Sign out</button>
-        </p>
-      )}
-
-      {comments.length === 0 && !unavailable ? (
-        <div className="comments-empty">
-          <MessageCircle size={22} />
-          <span>No comments yet</span>
-          <small>Be the first to say something about this rally.</small>
-        </div>
-      ) : (
-        <ul className="comment-list">
-          {comments.map((c) => (
-            <li key={c.id} className="comment">
-              <Avatar name={c.name} photo={c.photo} />
-              <div className="comment-body">
-                <div className="comment-head">
-                  <span className="comment-name">{c.name}</span>
-                  <span className="comment-time">{timeAgo(c.createdAt)}</span>
-                  {user?.uid === c.uid && (
-                    <button className="comment-del" onClick={() => remove(c.id)} aria-label="Delete comment">
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                </div>
-                <p className="comment-text">{c.text}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function GoogleMark() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
-      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z" />
-      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
-      <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.3 0-9.7-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z" />
-      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z" />
-    </svg>
   );
 }
 
@@ -570,7 +422,7 @@ function Detail() {
     }
   };
   const user = useAuthUser();
-  const { likeIds, comments, unavailable } = useClipSocial(active?.id);
+  const { likeIds, unavailable } = useClipLikes(active?.id);
   const liked = !!user && likeIds.includes(user.uid);
   const [authErr, setAuthErr] = useState(null);
 
@@ -673,14 +525,6 @@ function Detail() {
                         <Heart size={18} fill={liked ? "currentColor" : "none"} />
                         <span key={likeIds.length} className="bump">{likeIds.length}</span>
                       </button>
-                      <button
-                        className="act-btn"
-                        onClick={() => document.getElementById("comments")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                        aria-label="Comments"
-                      >
-                        <MessageCircle size={18} />
-                        <span key={comments.length} className="bump">{comments.length}</span>
-                      </button>
                     </>
                   )}
                   <button className="watch-download" onClick={onDownload} disabled={downloading}>
@@ -695,15 +539,6 @@ function Detail() {
               {authErr && <p className="comments-error">{authErr}</p>}
             </div>
 
-            {active && (
-              <Comments
-                clipId={active.id}
-                comments={comments}
-                user={user}
-                unavailable={unavailable}
-                onSignIn={signIn}
-              />
-            )}
 
           {/* ---- court tabs + clips from this hour ---- */}
           <aside className="watch-side">
@@ -1993,10 +1828,9 @@ const CSS = `
   .watch-icon:hover { background: var(--tile-hover); }
 
   .watch-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; column-gap: 28px; align-items: start;
-    grid-template-areas: "player side" "info side" "comments side"; grid-template-rows: auto auto 1fr; }
+    grid-template-areas: "player side" "info side"; grid-template-rows: auto 1fr; }
   .watch-grid > .player { grid-area: player; }
   .watch-grid > .watch-info { grid-area: info; }
-  .watch-grid > .comments { grid-area: comments; }
   .watch-grid > .watch-side { grid-area: side; }
 
   /* ---- like / comment ---- */
@@ -2010,50 +1844,10 @@ const CSS = `
   .act-btn.liked svg { animation: pop .3s ease; }
   @keyframes pop { 50% { transform: scale(1.3); } }
 
-  .comments { margin-top: 28px; padding: 22px 22px 24px; border-radius: 22px; background: var(--tile);
-    border: 1px solid var(--border-soft); scroll-margin-top: 20px; }
-  .comments-empty { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 26px 12px 8px;
-    text-align: center; }
-  .comments-empty svg { opacity: .35; margin-bottom: 6px; }
-  .comments-empty span { font-size: 14px; font-weight: 700; opacity: .8; }
-  .comments-empty small { font-size: 13px; opacity: .5; }
-  .comments-title { font-size: 17px; font-weight: 800; margin-bottom: 16px; }
-  .comments-count { font-weight: 500; opacity: .5; margin-left: 4px; }
-  .comments-note { font-size: 13px; opacity: .55; margin: 14px 0 0; }
   .comments-error { font-size: 13px; color: #ff7b8f; margin-top: 8px; }
-  .comments-who { font-size: 12px; opacity: .55; margin: 8px 0 0 48px; }
-  .link-btn { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; cursor: pointer; }
-  .signin-btn { display: inline-flex; align-items: center; gap: 10px; height: 44px; padding: 0 18px;
-    border-radius: 12px; border: 1px solid var(--border); background: var(--tile); color: var(--fg);
-    font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; transition: background .2s; }
-  .signin-btn:hover { background: var(--tile-hover); }
   .avatar { flex: none; border-radius: 50%; object-fit: cover; background: var(--tile-hover); }
   .avatar-initial { display: inline-flex; align-items: center; justify-content: center; font-size: 14px;
     font-weight: 800; color: var(--on-accent); background: var(--accent); }
-  .comment-form { display: flex; align-items: flex-start; gap: 12px; }
-  .comment-box { flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 8px; padding: 5px 5px 5px 16px;
-    border-radius: 22px; border: 1px solid var(--border-soft); background: rgba(0,0,0,.18);
-    transition: border-color .2s, box-shadow .2s; }
-  .app[data-theme="light"] .comment-box { background: rgba(255,255,255,.75); }
-  .comment-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
-  .comment-box textarea { flex: 1; min-width: 0; min-height: 30px; max-height: 140px; padding: 6px 0;
-    border: 0; outline: none; resize: none; background: none; color: var(--fg); font-family: inherit;
-    font-size: 14px; line-height: 1.4; field-sizing: content; }
-  .comment-box textarea::placeholder { color: var(--placeholder); }
-  .comment-send { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--accent);
-    color: var(--on-accent); display: flex; align-items: center; justify-content: center; cursor: pointer;
-    transition: opacity .2s; }
-  .comment-send:disabled { opacity: .35; cursor: default; }
-  .comment-list { list-style: none; padding: 18px 0 0; margin: 18px 0 0; border-top: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 18px; }
-  .comment { display: flex; gap: 12px; }
-  .comment-body { min-width: 0; flex: 1; }
-  .comment-head { display: flex; align-items: center; gap: 8px; }
-  .comment-name { font-size: 13px; font-weight: 700; }
-  .comment-time { font-size: 12px; opacity: .45; }
-  .comment-del { margin-left: auto; width: 26px; height: 26px; border-radius: 50%; border: 0; background: none;
-    color: var(--fg); opacity: .4; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-  .comment-del:hover { opacity: .9; background: var(--tile); }
-  .comment-text { margin-top: 3px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
   .player { border-radius: 20px; overflow: hidden; background: #000; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
   .player-video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; }
   .player-face { aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center;
@@ -2131,7 +1925,7 @@ const CSS = `
   }
   @media (max-width: 960px) {
     .watch-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: none;
-      grid-template-areas: "player" "info" "side" "comments"; }
+      grid-template-areas: "player" "info" "side"; }
     .watch-side { margin-top: 26px; }
   }
   /* phones: full-bleed player, full-width download, app-style list */
@@ -2156,8 +1950,6 @@ const CSS = `
     .watch-hint { align-self: center; }
     .watch-side { margin-top: 22px; padding: 0 16px; }
     .ep { grid-template-columns: 128px minmax(0, 1fr); padding: 4px; }
-    .comments { margin: 26px 16px 0; padding: 18px 16px 20px; border-radius: 18px; }
-    .comment-box textarea { font-size: 16px; } /* 16px: no iOS zoom on focus */
   }
 
   @media (max-width: 1360px) {
@@ -2372,7 +2164,7 @@ const CSS = `
   /* lists: stagger in on first paint */
   .shelf { animation: rise .6s cubic-bezier(.2,.8,.2,1) both; }
   .shelf:nth-child(2) { animation-delay: .08s; } .shelf:nth-child(3) { animation-delay: .16s; }
-  .card, .ep, .comment { animation: card-in .55s cubic-bezier(.2,.8,.2,1) both; }
+  .card, .ep { animation: card-in .55s cubic-bezier(.2,.8,.2,1) both; }
   .card:nth-child(2), .ep:nth-child(2) { animation-delay: .05s; }
   .card:nth-child(3), .ep:nth-child(3) { animation-delay: .1s; }
   .card:nth-child(4), .ep:nth-child(4) { animation-delay: .15s; }
@@ -2397,7 +2189,7 @@ const CSS = `
   @keyframes bump { from { transform: translateY(-6px) scale(1.3); opacity: .4; } }
 
   /* empty states fade */
-  .empty, .ep-empty, .comments-note { animation: rise .5s ease both; }
+  .empty, .ep-empty { animation: rise .5s ease both; }
 
   /* respect "reduce motion" */
   @media (prefers-reduced-motion: reduce) {
