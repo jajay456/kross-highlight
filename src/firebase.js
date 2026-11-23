@@ -1,5 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
 
 const app = initializeApp({
   apiKey: import.meta.env.VITE_FB_API_KEY,
@@ -11,3 +12,8 @@ const app = initializeApp({
 });
 
 export const db = getFirestore(app);
+
+// Google sign-in, used only for likes and comments (browsing stays anonymous)
+export const auth = getAuth(app);
+export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: "select_account" });

@@ -1,0 +1,43 @@
+rules_version = '2';
+
+// Likes & comments for KROSS Highlight.
+//
+// MERGE these blocks into your existing rules (Firebase Console → Firestore → Rules).
+// Do not replace your whole ruleset with this file unless you have checked the clip-level
+// rule below: whatever uploads clips into `kross_highlight` must still be allowed to write.
+// (Uploaders using the Firebase Admin SDK bypass rules entirely.)
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /kross_highlight/{clipId} {
+      // clips stay publicly readable; keep your existing write rule for the uploader here
+      allow read: if true;
+
+      // one like per signed-in user per clip; the doc id is the user's uid
+      match /likes/{uid} {
+        allow read: if true;
+        allow create: if request.auth != null
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['createdAt'])
+          && request.resource.data.createdAt == request.time;
+        allow delete: if request.auth != null && request.auth.uid == uid;
+      }
+
+      // comments: signed-in users post as themselves, 1–500 chars, and can delete only their own
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if request.auth != null
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'photo', 'text', 'createdAt'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.name is string && request.resource.data.name.size() <= 80
+          && request.resource.data.photo is string && request.resource.data.photo.size() <= 500
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 500
+          && request.resource.data.createdAt == request.time;
+        allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
+        // no edits: comments can only be posted or deleted
+      }
+    }
+  }
+}
