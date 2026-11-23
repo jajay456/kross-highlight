@@ -199,6 +199,11 @@ function getInitialTheme() {
 }
 
 /* ---------- shared shell ---------- */
+// Netlify's Free plan injects a "Powered by Netlify" badge in the bottom-right corner that we
+// can't move or style (it lives in its own frame). On the live site, lift the phone tab bar
+// above it. Set to false once the badge is turned off in Netlify's project settings.
+const HOST_BADGE = !/^(localhost|127\.|0\.0\.0\.0|192\.168\.|10\.)/.test(window.location.hostname);
+
 // theme lives in Shell; pages that draw their own chrome (home) reach it through context
 const ThemeCtx = createContext({ theme: "dark", toggleTheme: () => {} });
 
@@ -256,7 +261,7 @@ function Shell({ children, bare = false }) {
 
   return (
     <ThemeCtx.Provider value={{ theme, toggleTheme }}>
-      <div className="app" data-theme={theme}>
+      <div className={`app${HOST_BADGE ? " has-host-badge" : ""}`} data-theme={theme}>
         <style>{CSS}</style>
         <div className="bg" style={{ backgroundImage: `url(${BG})` }} />
         <div className="scrim" />
@@ -1641,6 +1646,9 @@ const CSS = `
   }
 
   /* overflow-x: clip (not hidden) so position: sticky on the sidebar still works */
+  /* room reserved under the phone tab bar for the host's badge (see HOST_BADGE) */
+  .app { --badge-space: 0px; }
+  .app.has-host-badge { --badge-space: 64px; }
   .app { position: relative; min-height: 100vh; overflow-x: clip;
     font-family: system-ui, -apple-system, sans-serif; color: var(--fg); transition: color .2s; }
   .bg { position: fixed; inset: 0; background-size: cover; background-position: center; z-index: 0;
@@ -2147,11 +2155,12 @@ const CSS = `
     .shelf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .studio { grid-template-columns: minmax(0, 1fr); }
     .sidebar { display: none; }
-    .main { padding: 22px 22px 110px; }
+    .main { padding: 22px 22px calc(110px + var(--badge-space)); }
     .mainbar-theme { display: none; }
     .toolbar .chips { display: flex; margin-left: 0; }
     /* ---- tab bar: same look as the desktop rail — dark green glass, soft tile + glowing edge marker ---- */
-    .tabbar { position: fixed; left: 16px; right: 16px; bottom: max(14px, env(safe-area-inset-bottom));
+    .tabbar { position: fixed; left: 16px; right: 16px;
+      bottom: calc(max(14px, env(safe-area-inset-bottom)) + var(--badge-space));
       z-index: 30; display: block; max-width: 420px; margin: 0 auto; height: 66px; padding: 8px;
       border-radius: 26px; border: 1px solid var(--glass-edge); background: var(--tabbar-bg);
       backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5);
@@ -2179,7 +2188,7 @@ const CSS = `
     .studio { margin: 0; border-radius: 0; border: 0; box-shadow: none; min-height: 100vh;
       background: rgba(7,22,16,.84); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
     .app[data-theme="light"] .studio { background: #f4f6f6; }
-    .main { display: flex; flex-direction: column; padding: 0 0 96px; }
+    .main { display: flex; flex-direction: column; padding: 0 0 calc(96px + var(--badge-space)); }
     .main > * { margin-left: 16px; margin-right: 16px; }
     .main > .feature-wrap { margin: 0 0 18px; order: -1; }
 
