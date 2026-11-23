@@ -11,7 +11,7 @@ import {
 import {
   Search, Moon, Sun, ArrowLeft, Play, Calendar, Clock, X, RotateCcw,
   ChevronDown, ChevronLeft, ChevronRight, Download, LoaderCircle,
-  House, LayoutGrid, Heart, MessageCircle, Send, Trash2, LogOut, UserRound,
+  House, LayoutGrid, Heart, MessageCircle, Send, Trash2, LogOut, UserRound, Menu,
 } from "lucide-react";
 import {
   collection, query, orderBy, onSnapshot, limit, doc, setDoc, deleteDoc, addDoc, serverTimestamp,
@@ -199,11 +199,6 @@ function getInitialTheme() {
 }
 
 /* ---------- shared shell ---------- */
-// Netlify's Free plan injects a "Powered by Netlify" badge in the bottom-right corner that we
-// can't move or style (it lives in its own frame). On the live site, lift the phone tab bar
-// above it. Set to false once the badge is turned off in Netlify's project settings.
-const HOST_BADGE = !/^(localhost|127\.|0\.0\.0\.0|192\.168\.|10\.)/.test(window.location.hostname);
-
 // theme lives in Shell; pages that draw their own chrome (home) reach it through context
 const ThemeCtx = createContext({ theme: "dark", toggleTheme: () => {} });
 
@@ -261,7 +256,7 @@ function Shell({ children, bare = false }) {
 
   return (
     <ThemeCtx.Provider value={{ theme, toggleTheme }}>
-      <div className={`app${HOST_BADGE ? " has-host-badge" : ""}`} data-theme={theme}>
+      <div className="app" data-theme={theme}>
         <style>{CSS}</style>
         <div className="bg" style={{ backgroundImage: `url(${BG})` }} />
         <div className="scrim" />
@@ -1059,11 +1054,22 @@ function Grid() {
 
   const user = useAuthUser();
   const [tab, setTab] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e) => e.key === "Escape" && setMenuOpen(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
   const tabLock = useRef(0); // ignore scroll-driven updates while a tap's own scroll is running
   const pickTab = (i, action) => {
     tabLock.current = Date.now() + 1000;
     setTab(i);
     action?.();
+  };
+  const menuPick = (i, action) => {
+    setMenuOpen(false);
+    pickTab(i, action);
   };
   useEffect(() => {
     const onScroll = () => {
@@ -1322,27 +1328,36 @@ function Grid() {
         </div>
       </div>
 
-      {/* ---- bottom tab bar (phones) ---- */}
-      <nav className="tabbar" aria-label="Sections">
-        <div className="tabs-track" style={{ "--i": tab }}>
-          <span className="tab-ind" aria-hidden="true" />
-          <button className={`tab${tab === 0 ? " active" : ""}`} onClick={() => pickTab(0, toTop)} aria-label="Home">
-            <House size={22} />
-          </button>
-          <button className={`tab${tab === 1 ? " active" : ""}`} onClick={() => pickTab(1, focusSearch)} aria-label="Search">
-            <Search size={22} />
-          </button>
-          <button
-            className={`tab${tab === 2 ? " active" : ""}`}
-            onClick={() => pickTab(2, () => scrollTo("all"))}
-            aria-label="All highlights"
-          >
-            <LayoutGrid size={22} />
-          </button>
-          {/* theme just toggles; it never takes the bubble */}
-          <ThemeButton className="tab" />
-        </div>
-      </nav>
+      {/* ---- phones / tablets: round button at bottom-centre that pops the menu up ---- */}
+      <div className={`fab-wrap${menuOpen ? " open" : ""}`}>
+        <div className="fab-backdrop" onClick={() => setMenuOpen(false)} aria-hidden="true" />
+        {/* items fan out in a half-circle above the button (positions set in CSS) */}
+        <nav className="fab-menu" aria-label="Sections" aria-hidden={!menuOpen} inert={!menuOpen}>
+            <button className={`tab${tab === 0 ? " active" : ""}`} onClick={() => menuPick(0, toTop)} aria-label="Home">
+              <House size={22} />
+            </button>
+            <button className={`tab${tab === 1 ? " active" : ""}`} onClick={() => menuPick(1, focusSearch)} aria-label="Search">
+              <Search size={22} />
+            </button>
+            <button
+              className={`tab${tab === 2 ? " active" : ""}`}
+              onClick={() => menuPick(2, () => scrollTo("all"))}
+              aria-label="All highlights"
+            >
+              <LayoutGrid size={22} />
+            </button>
+            {/* theme just toggles (menu stays open so you see the change); it never takes the highlight */}
+            <ThemeButton className="tab" />
+        </nav>
+        <button
+          className="fab"
+          onClick={() => setMenuOpen((o) => !o)}
+          aria-expanded={menuOpen}
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
+        >
+          <span className="fab-icon">{menuOpen ? <X size={22} /> : <Menu size={22} />}</span>
+        </button>
+      </div>
     </Shell>
   );
 }
@@ -1646,9 +1661,6 @@ const CSS = `
   }
 
   /* overflow-x: clip (not hidden) so position: sticky on the sidebar still works */
-  /* room reserved under the phone tab bar for the host's badge (see HOST_BADGE) */
-  .app { --badge-space: 0px; }
-  .app.has-host-badge { --badge-space: 64px; }
   .app { position: relative; min-height: 100vh; overflow-x: clip;
     font-family: system-ui, -apple-system, sans-serif; color: var(--fg); transition: color .2s; }
   .bg { position: fixed; inset: 0; background-size: cover; background-position: center; z-index: 0;
@@ -1823,7 +1835,7 @@ const CSS = `
   .card.skeleton { box-shadow: none; background: var(--tile); animation: pulse 1.4s ease-in-out infinite; }
 
   /* ---- bottom tab bar (phones only) ---- */
-  .tabbar { display: none; }
+  .fab-wrap { display: none; }
   .tab-label { display: none; }
 
   .icon-btn { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border-soft);
@@ -2155,40 +2167,69 @@ const CSS = `
     .shelf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .studio { grid-template-columns: minmax(0, 1fr); }
     .sidebar { display: none; }
-    .main { padding: 22px 22px calc(110px + var(--badge-space)); }
+    /* left gutter for the vertical tab rail */
+    .main { padding: 22px 22px 100px; }
     .mainbar-theme { display: none; }
     .toolbar .chips { display: flex; margin-left: 0; }
-    /* ---- tab bar: same look as the desktop rail — dark green glass, soft tile + glowing edge marker ---- */
-    .tabbar { position: fixed; left: 16px; right: 16px;
-      bottom: calc(max(14px, env(safe-area-inset-bottom)) + var(--badge-space));
-      z-index: 30; display: block; max-width: 420px; margin: 0 auto; height: 66px; padding: 8px;
-      border-radius: 26px; border: 1px solid var(--glass-edge); background: var(--tabbar-bg);
+    /* ---- floating menu button (bottom-centre) + menu that springs up from it ---- */
+    .fab-wrap { display: block; }
+    .fab { position: fixed; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); z-index: 32;
+      width: 58px; height: 58px; margin-left: -29px; border-radius: 50%; padding: 0;
+      border: 1px solid var(--glass-edge); background: var(--tabbar-bg); color: var(--fg);
+      display: flex; align-items: center; justify-content: center; cursor: pointer;
       backdrop-filter: blur(24px) saturate(1.5); -webkit-backdrop-filter: blur(24px) saturate(1.5);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,.14), inset 0 -1px 0 rgba(255,255,255,.05),
-        0 18px 44px rgba(0,0,0,.45); }
-    .tabs-track { position: relative; display: flex; height: 100%; }
-    /* active tile slides between tabs; its ::after is the glowing marker on the bar's bottom edge */
-    .tab-ind { position: absolute; top: 0; bottom: 0; left: calc(25% * var(--i) + 6px); width: calc(25% - 12px);
-      z-index: 0; border-radius: 16px; background: rgba(255,255,255,.08); pointer-events: none;
-      transition: left .45s cubic-bezier(.34,1.4,.64,1); }
-    .app[data-theme="light"] .tab-ind { background: rgba(20,24,22,.07); }
-    .tab-ind::after { content: ""; position: absolute; left: 50%; bottom: -9px; width: 26px; height: 4px;
-      margin-left: -13px; border-radius: 4px 4px 0 0; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
-    .tab { position: relative; z-index: 1; flex: 1; height: 100%; border: 0; background: none; padding: 0;
-      color: var(--fg); opacity: .6; display: flex; align-items: center; justify-content: center;
-      cursor: pointer; -webkit-tap-highlight-color: transparent; transition: opacity .25s; }
-    .tab svg { transition: transform .35s cubic-bezier(.34,1.56,.64,1); }
-    .tab:hover { opacity: .9; }
-    .tab.active { opacity: 1; }
-    .tab.active svg { transform: scale(1.08); }
-    .tab:active svg { transform: scale(.86); transition-duration: .12s; }
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 14px 36px rgba(0,0,0,.45);
+      -webkit-tap-highlight-color: transparent;
+      transition: transform .35s cubic-bezier(.34,1.56,.64,1), background .25s, color .25s, box-shadow .25s; }
+    .fab:active { transform: scale(.88); }
+    .fab-icon { display: flex; transition: transform .45s cubic-bezier(.34,1.56,.64,1); }
+    .fab-wrap.open .fab { background: var(--accent); color: var(--on-accent); border-color: transparent;
+      box-shadow: 0 0 0 6px rgba(95,227,154,.18), 0 14px 36px rgba(0,0,0,.45); }
+    .fab-wrap.open .fab-icon { transform: rotate(180deg); }
+
+    .fab-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(2,10,6,.45);
+      backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+      opacity: 0; pointer-events: none; transition: opacity .3s; }
+    .fab-wrap.open .fab-backdrop { opacity: 1; pointer-events: auto; }
+
+    /* radial menu: a zero-size anchor at the button's centre; each item flies out to its spot on the arc */
+    .fab-menu { position: fixed; left: 50%; bottom: calc(max(16px, env(safe-area-inset-bottom)) + 29px);
+      z-index: 31; width: 0; height: 0; pointer-events: none; }
+    .fab-wrap.open .fab-menu { pointer-events: auto; }
+    .fab-menu .tab { position: absolute; left: -26px; top: -26px; width: 52px; height: 52px; padding: 0;
+      border-radius: 50%; border: 1px solid var(--glass-edge); background: var(--tabbar-bg); color: var(--fg);
+      display: flex; align-items: center; justify-content: center; cursor: pointer;
+      backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 10px 26px rgba(0,0,0,.45);
+      -webkit-tap-highlight-color: transparent;
+      transform: translate(0, 0) scale(.2) rotate(-90deg); opacity: 0;
+      transition: transform .5s cubic-bezier(.34,1.56,.64,1), opacity .2s, background .2s, color .2s, border-color .2s; }
+    /* arc: radius 100px, angles 165° · 115° · 65° · 15° (left → right over the top) */
+    .fab-menu .tab:nth-of-type(1) { --x: -97px; --y: -26px; }
+    .fab-menu .tab:nth-of-type(2) { --x: -42px; --y: -91px; }
+    .fab-menu .tab:nth-of-type(3) { --x: 42px;  --y: -91px; }
+    .fab-menu .tab:nth-of-type(4) { --x: 97px;  --y: -26px; }
+    .fab-wrap.open .fab-menu .tab { transform: translate(var(--x), var(--y)) scale(1) rotate(0); opacity: 1; }
+    .fab-wrap.open .fab-menu .tab:nth-of-type(2) { transition-delay: .04s; }
+    .fab-wrap.open .fab-menu .tab:nth-of-type(3) { transition-delay: .08s; }
+    .fab-wrap.open .fab-menu .tab:nth-of-type(4) { transition-delay: .12s; }
+    /* closing: fold back in reverse order */
+    .fab-menu .tab:nth-of-type(1) { transition-delay: .09s; }
+    .fab-menu .tab:nth-of-type(2) { transition-delay: .06s; }
+    .fab-menu .tab:nth-of-type(3) { transition-delay: .03s; }
+    .fab-wrap.open .fab-menu .tab:nth-of-type(1) { transition-delay: 0s; }
+    .fab-menu .tab.active { color: var(--accent); border-color: rgba(95,227,154,.55);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 0 0 4px rgba(95,227,154,.14), 0 10px 26px rgba(0,0,0,.45); }
+    .fab-menu .tab:hover { background: var(--tile-hover); }
+    .fab-wrap.open .fab-menu .tab:active { transform: translate(var(--x), var(--y)) scale(.88); transition-delay: 0s;
+      transition-duration: .12s; }
   }
   /* phones: streaming-app layout — full-bleed hero, club tabs, sideways rows, bottom tab bar */
   @media (max-width: 720px) {
     .studio { margin: 0; border-radius: 0; border: 0; box-shadow: none; min-height: 100vh;
       background: rgba(7,22,16,.84); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
     .app[data-theme="light"] .studio { background: #f4f6f6; }
-    .main { display: flex; flex-direction: column; padding: 0 0 calc(96px + var(--badge-space)); }
+    .main { display: flex; flex-direction: column; padding: 0 0 96px; }
     .main > * { margin-left: 16px; margin-right: 16px; }
     .main > .feature-wrap { margin: 0 0 18px; order: -1; }
 
